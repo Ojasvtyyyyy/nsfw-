@@ -19,17 +19,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # Initialize Craiyon API
 generator = Craiyon()
 
-# Initialize Telegram Bot with specific settings to prevent conflicts
-telegram_app = (
-    Application.builder()
-    .token(TELEGRAM_BOT_TOKEN)
-    .arbitrary_callback_data(True)
-    .build()
-)
-
-# Add a flag to track if the bot is running
-bot_running = False
-bot_lock = threading.Lock()
+# Initialize Telegram Bot
+telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
 async def start(update: Update, context):
     """Handle /start command."""
@@ -72,33 +63,17 @@ def run_flask():
 
 def main():
     """Run both Flask and Telegram Bot"""
-    global bot_running
+    # Add handlers
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_image))
     
-    with bot_lock:
-        if bot_running:
-            logger.warning("Bot is already running!")
-            return
-        bot_running = True
+    # Start Flask in a separate thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    try:
-        # Add handlers
-        telegram_app.add_handler(CommandHandler("start", start))
-        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_image))
-        
-        # Start Flask in a separate thread
-        flask_thread = threading.Thread(target=run_flask)
-        flask_thread.daemon = True  # This ensures the thread will be terminated when the main program exits
-        flask_thread.start()
-        
-        # Start the bot with specific settings
-        telegram_app.run_polling(
-            drop_pending_updates=True,  # Ignore any pending updates
-            allowed_updates=Update.ALL_TYPES,
-            stop_signals=None  # Disable default signal handlers
-        )
-    finally:
-        with bot_lock:
-            bot_running = False
+    # Start the bot
+    telegram_app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
