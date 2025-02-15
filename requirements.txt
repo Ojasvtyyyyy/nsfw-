@@ -1,0 +1,6 @@
+python-telegram-bot
+diffusers
+transformers
+torch
+accelerate
+python-dotenv
