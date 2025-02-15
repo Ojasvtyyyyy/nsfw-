@@ -1,5 +1,5 @@
 import os
-import threading
+import asyncio
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
@@ -11,14 +11,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # ✅ Initialize Craiyon API
 generator = Craiyon()  # Uses Craiyon's online API (no GPU needed)
 
-# ✅ Initialize Flask (for Render Free Tier)
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is running!", 200
-
-# ✅ Telegram Bot Logic
+# ✅ Initialize Telegram Bot
 telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
 async def start(update: Update, context):
@@ -45,13 +38,25 @@ async def generate_image(update: Update, context):
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_image))
 
-# ✅ Run Telegram Bot in a separate thread
-def run_telegram_bot():
-    print("Starting Telegram bot...")
-    telegram_app.run_polling()
+# ✅ Flask App for Render
+flask_app = Flask(__name__)
 
-threading.Thread(target=run_telegram_bot, daemon=True).start()
+@flask_app.route('/')
+def home():
+    return "Bot is running!", 200
 
-# ✅ Start Flask Server
+# ✅ Start Everything Properly with asyncio
+async def main():
+    """Run both Flask and Telegram Bot in a proper event loop."""
+    # Start Telegram Bot in a background task
+    task = asyncio.create_task(telegram_app.run_polling())
+
+    # Start Flask in the same event loop
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(asyncio.to_thread(flask_app.run, host="0.0.0.0", port=int(os.getenv("PORT", 8080))))
+
+    # Keep running
+    await task
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    asyncio.run(main())  # ✅ Correct way to run asyncio code
