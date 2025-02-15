@@ -1,46 +1,41 @@
 import os
-import logging
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
-from generate import generate_image
-from dotenv import load_dotenv
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from craiyon import CraiyonV3  # Use Craiyon v3
 
-# Load environment variables
-load_dotenv()
+# Load Telegram Bot Token from Render environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# ✅ Initialize Craiyon v3 API
+generator = CraiyonV3()  # Uses Craiyon's online API (no GPU needed)
 
-def start(update: Update, context: CallbackContext) -> None:
-    """Sends a welcome message."""
-    update.message.reply_text("Welcome! Use /imagine <prompt> to generate an image.")
+# ✅ Initialize Telegram Bot
+app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-def imagine(update: Update, context: CallbackContext) -> None:
-    """Handles the /imagine command."""
-    prompt = " ".join(context.args)
-    if not prompt:
-        update.message.reply_text("Usage: /imagine <your prompt>")
-        return
+async def start(update: Update, context):
+    """Handle /start command."""
+    await update.message.reply_text("Hello! Send me a prompt, and I'll generate an image for you.")
 
-    update.message.reply_text(f"Generating image for: {prompt}...")
+async def generate_image(update: Update, context):
+    """Generate an image from user prompt using Craiyon API."""
+    prompt = update.message.text
+    await update.message.reply_text(f"Generating image for: '{prompt}'... Please wait ⏳")
 
-    image_path = generate_image(prompt)
-    if image_path:
-        update.message.reply_photo(photo=open(image_path, "rb"))
-    else:
-        update.message.reply_text("Error generating image. Try again.")
+    try:
+        # Generate image using Craiyon v3
+        result = generator.generate(prompt)
+        image_path = "image.png"
+        result.images[0].save(image_path)  # Save first generated image
 
-def main():
-    """Starts the bot."""
-    updater = Updater(TELEGRAM_BOT_TOKEN)
-    dispatcher = updater.dispatcher
+        # Send image back to user
+        await update.message.reply_photo(photo=open(image_path, "rb"))
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
 
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("imagine", imagine))
+# ✅ Add command handlers
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_image))
 
-    updater.start_polling()
-    updater.idle()
-
-if __name__ == "__main__":
-    main()
+# ✅ Start bot
+print("Bot is running...")
+app.run_polling()
