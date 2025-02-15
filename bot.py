@@ -1,11 +1,9 @@
 import os
-import asyncio
+import threading
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from craiyon import Craiyon
-from threading import Thread
-import json
 import logging
 
 # Set up logging
@@ -21,8 +19,17 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # Initialize Craiyon API
 generator = Craiyon()
 
-# Initialize Telegram Bot
-telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+# Initialize Telegram Bot with specific settings to prevent conflicts
+telegram_app = (
+    Application.builder()
+    .token(TELEGRAM_BOT_TOKEN)
+    .arbitrary_callback_data(True)
+    .build()
+)
+
+# Add a flag to track if the bot is running
+bot_running = False
+bot_lock = threading.Lock()
 
 async def start(update: Update, context):
     """Handle /start command."""
@@ -34,46 +41,22 @@ async def generate_image(update: Update, context):
     await update.message.reply_text(f"Generating image for: '{prompt}'... Please wait ⏳")
     
     try:
-        # Add more detailed logging
         logger.info(f"Attempting to generate image with prompt: {prompt}")
+        result = generator.generate(prompt, negative_prompt="bad quality", model_type="art")
         
-        # Generate image with error catching
-        try:
-            result = generator.generate(prompt, negative_prompt="bad quality", model_type="art")
-            logger.info("Image generation successful")
-        except Exception as e:
-            logger.error(f"Error during image generation: {str(e)}")
-            await update.message.reply_text("Sorry, there was an error generating the image. Please try again.")
-            return
-
-        # Create the generated directory if it doesn't exist
         os.makedirs("generated", exist_ok=True)
+        image_path = "generated/image_0.png"
+        result.save_images()
         
-        # Save and send image with error catching
-        try:
-            image_path = "generated/image_0.png"
-            result.save_images()
-            logger.info(f"Image saved to {image_path}")
-            
-            # Check if file exists before sending
-            if os.path.exists(image_path):
-                await update.message.reply_photo(photo=open(image_path, "rb"))
-                logger.info("Image sent successfully")
-            else:
-                raise FileNotFoundError(f"Generated image not found at {image_path}")
-                
-        except Exception as e:
-            logger.error(f"Error saving or sending image: {str(e)}")
-            await update.message.reply_text("Sorry, there was an error processing the generated image.")
-            return
+        if os.path.exists(image_path):
+            await update.message.reply_photo(photo=open(image_path, "rb"))
+            logger.info("Image sent successfully")
+        else:
+            raise FileNotFoundError(f"Generated image not found at {image_path}")
             
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        await update.message.reply_text("An unexpected error occurred. Please try again later.")
-
-# Add command handlers
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_image))
+        logger.error(f"Error: {str(e)}")
+        await update.message.reply_text(f"Sorry, an error occurred: {str(e)}")
 
 # Flask App
 flask_app = Flask(__name__)
@@ -89,12 +72,33 @@ def run_flask():
 
 def main():
     """Run both Flask and Telegram Bot"""
-    # Start Flask in a separate thread
-    flask_thread = Thread(target=run_flask)
-    flask_thread.start()
+    global bot_running
     
-    # Run Telegram bot
-    telegram_app.run_polling()
+    with bot_lock:
+        if bot_running:
+            logger.warning("Bot is already running!")
+            return
+        bot_running = True
+    
+    try:
+        # Add handlers
+        telegram_app.add_handler(CommandHandler("start", start))
+        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_image))
+        
+        # Start Flask in a separate thread
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.daemon = True  # This ensures the thread will be terminated when the main program exits
+        flask_thread.start()
+        
+        # Start the bot with specific settings
+        telegram_app.run_polling(
+            drop_pending_updates=True,  # Ignore any pending updates
+            allowed_updates=Update.ALL_TYPES,
+            stop_signals=None  # Disable default signal handlers
+        )
+    finally:
+        with bot_lock:
+            bot_running = False
 
 if __name__ == "__main__":
     main()
