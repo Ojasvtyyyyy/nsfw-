@@ -1,13 +1,13 @@
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from craiyon import CraiyonV3  # Use Craiyon v3
+from craiyon import Craiyon  # ✅ Use correct class
 
-# Load Telegram Bot Token from Render environment variables
+# Load Telegram Bot Token from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# ✅ Initialize Craiyon v3 API
-generator = CraiyonV3()  # Uses Craiyon's online API (no GPU needed)
+# ✅ Initialize Craiyon API
+generator = Craiyon()  # Uses Craiyon's online API (no GPU needed)
 
 # ✅ Initialize Telegram Bot
 app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -22,10 +22,10 @@ async def generate_image(update: Update, context):
     await update.message.reply_text(f"Generating image for: '{prompt}'... Please wait ⏳")
 
     try:
-        # Generate image using Craiyon v3
-        result = generator.generate(prompt)
-        image_path = "image.png"
-        result.images[0].save(image_path)  # Save first generated image
+        # Generate image using Craiyon
+        result = generator.generate(prompt, negative_prompt="bad quality", model_type="art")
+        image_path = "generated/image_0.png"
+        result.save_images()  # Save the generated image
 
         # Send image back to user
         await update.message.reply_photo(photo=open(image_path, "rb"))
